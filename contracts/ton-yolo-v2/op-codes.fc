@@ -1,0 +1,15 @@
+const op::initialize = "OP_INITIALIZE"c; ;; Initializes the contract with the given parameters.
+const op::deposit = "OP_DEPOSIT"c; ;; Handles user deposits for a specific round.
+const op::cancel = "OP_CANCEL"c; ;; Cancels the current round.
+const op::draw_winner = "OP_DRAW_WINNER"c; ;; Draws a winner for the current round.
+const op::update_value_per_entry = "OP_UPDATE_VALUE_PER_ENTRY"c; ;; Updates the TON value required per entry.
+const op::set_contract_paused = "OP_SET_CONTRACT_PAUSED"c; ;; Pauses or unpauses the contract.
+const op::claim_prizes = "OP_CLAIM_PRIZES"c; ;; Claims prizes for a specific round.
+const op::withdraw_deposits = "OP_WITHDRAW_DEPOSITS"c; ;; Withdraws user deposits from a specific round.
+const op::update_round_duration = "OP_UPDATE_ROUND_DURATION"c; ;; Updates the round duration.
+const op::update_protocol_fee_recipient = "OP_UPDATE_PROTOCOL_FEE_RECIPIENT"c; ;; Updates the recipient of protocol fees.
+const op::update_protocol_fee_bp = "OP_UPDATE_PROTOCOL_FEE_BP"c; ;; Updates the protocol fee basis points.
+const op::update_maximum_deposits = "OP_UPDATE_MAXIMUM_DEPOSITS"c; ;; Updates the maximum number of deposits per round
+const op::update_maximum_participants = "OP_UPDATE_MAXIMUM_PARTICIPANTS"c; ;; Updates the maximum number of participants per round.
+const op::cancel_after_randomness_requeset = "OP_CANCEL_AFTER_RANDOMNESS_REQUEST"c; ;; Cancels the round after a randomness request.
+const op::transfer_admin = "OP_TRANSFER_ADMIN"c;

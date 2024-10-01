@@ -13,7 +13,7 @@ export async function run(provider: NetworkProvider, args: string[]) {
     }
 
     const tonYoloV2 = provider.open(TonYoloV2.createFromAddress(address));
-
+    
     const counterBefore = await tonYoloV2.getCounter();
 
     await tonYoloV2.sendIncrease(provider.sender(), {

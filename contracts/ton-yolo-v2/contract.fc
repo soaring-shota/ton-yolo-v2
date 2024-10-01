@@ -7,6 +7,58 @@
 #include "./transfers.fc";
 #include "./rounds.fc";
 #include "./deposits.fc";
+#include "./op-codes.fc";
+
+;; load_data populates storage variables using stored data
+() load_data() impure {
+    var ds = get_data().begin_parse();
+
+    gameRounds = ds~load_dict();
+    numberOfRounds = ds~load_uint(32);
+    contractPaused = ds~load_uint(1);
+    depositCount = ds~load_dict();
+    protocolFeeRecipient = ds~load_msg_addr();
+    roundDuration = ds~load_uint(32);
+    valuePerEntry = ds~load_uint(256);
+    protocolFeeBp = ds~load_uint(16);
+    maximumNumberOfDepositsPerRound = ds~load_uint(40);
+    maximumNumberOfParticipantsPerRound = ds~load_uint(40);
+    randomnessRequests = ds~load_dict();
+
+    var additional_ds = ds~load_ref().begin_parse();
+    jettonAddr = additional_ds~load_msg_addr();
+    oracleAddr = additional_ds~load_msg_addr();
+    adminAddr = additional_ds~load_msg_addr();
+    
+    additional_ds.end_parse();
+    ds.end_parse();
+}
+
+;; save_data stores storage variables as a cell into persistent storage
+() save_data() impure {
+    var additionalCell = begin_cell()
+        .store_slice(jettonAddr)
+        .store_slice(oracleAddr)
+        .store_slice(adminAddr)
+        .end_cell();
+
+    set_data(
+        begin_cell()
+            .store_dict(gameRounds)
+            .store_uint(numberOfRounds, 32)
+            .store_uint(contractPaused, 1)
+            .store_dict(depositCount)
+            .store_slice(protocolFeeRecipient)
+            .store_uint(roundDuration, 32)
+            .store_uint(valuePerEntry, 256)
+            .store_uint(protocolFeeBp, 16)
+            .store_uint(maximumNumberOfDepositsPerRound, 40)
+            .store_uint(maximumNumberOfParticipantsPerRound, 40)
+            .store_dict(randomnessRequests)
+            .store_ref(additionalCell)
+            .end_cell()
+    );
+}
 
 ;; Internal function to update the round duration
 () _update_round_duration(int newRoundDuration) impure inline {
@@ -14,9 +66,13 @@
 }
 
 ;; Validates if the caller is the admin
-() _validate_is_admin(slice in_msg) inline {
-    slice user = in_msg~load_msg_addr();
-    throw_unless(user.slice_hash() == ADMIN_ADDR.slice_hash(), 106);  ;; Check if the signing address is the admin
+;; () _validate_is_admin(slice in_msg) inline {
+;;     slice user = in_msg~load_msg_addr();
+;;     throw_unless(user.slice_hash() == ADMIN_ADDR.slice_hash(), 106);  ;; Check if the signing address is the admin
+;; }
+
+() _validate_is_admin(slice senderAddress) inline {
+    throw_unless(senderAddress.slice_hash() == adminAddr.slice_hash(), 106);  ;; Check if the signing address is the admin
 }
 
 ;; Internal function to update the value per entry
@@ -50,34 +106,34 @@
 }
 
 ;; Constructor function to initialize the contract
-() initialize(slice in_msg) impure {
+;; () initialize(slice in_msg) impure {
 
-    ;; Ensure the caller is the admin
-    _validate_is_admin(in_msg);
-    in_msg~load_coins();
-    contractPaused = in_msg~load_uint(1);
-    protocolFeeRecipient = in_msg~load_msg_addr();
-    roundDuration = in_msg~load_uint(32);
-    valuePerEntry = in_msg~load_uint(256);
-    protocolFeeBp = in_msg~load_uint(16);
-    maximumNumberOfDepositsPerRound = in_msg~load_uint(40);
-    maximumNumberOfParticipantsPerRound = in_msg~load_uint(40);
+;;     ;; Ensure the caller is the admin
+;;     _validate_is_admin(in_msg);
+;;     in_msg~load_coins();
+;;     contractPaused = in_msg~load_uint(1);
+;;     protocolFeeRecipient = in_msg~load_msg_addr();
+;;     roundDuration = in_msg~load_uint(32);
+;;     valuePerEntry = in_msg~load_uint(256);
+;;     protocolFeeBp = in_msg~load_uint(16);
+;;     maximumNumberOfDepositsPerRound = in_msg~load_uint(40);
+;;     maximumNumberOfParticipantsPerRound = in_msg~load_uint(40);
 
-    ;; Initialize contract parameters
-    _update_round_duration(roundDuration);  ;; Set the round duration
-    _update_protocol_fee_recipient(protocolFeeRecipient);  ;; Set the protocol fee recipient
-    _update_protocol_fee_bp(protocolFeeBp);  ;; Set the protocol fee basis points
-    _update_value_per_entry(valuePerEntry);  ;; Set the value per entry
-    _update_maximum_number_of_deposits_per_round(maximumNumberOfDepositsPerRound);  ;; Set max deposits per round
-    _update_maximum_number_of_participants_per_round(maximumNumberOfParticipantsPerRound);  ;; Set max participants per round
+;;     ;; Initialize contract parameters
+;;     _update_round_duration(roundDuration);  ;; Set the round duration
+;;     _update_protocol_fee_recipient(protocolFeeRecipient);  ;; Set the protocol fee recipient
+;;     _update_protocol_fee_bp(protocolFeeBp);  ;; Set the protocol fee basis points
+;;     _update_value_per_entry(valuePerEntry);  ;; Set the value per entry
+;;     _update_maximum_number_of_deposits_per_round(maximumNumberOfDepositsPerRound);  ;; Set max deposits per round
+;;     _update_maximum_number_of_participants_per_round(maximumNumberOfParticipantsPerRound);  ;; Set max participants per round
 
-    ;; Start the first round with round count 0
-    depositCount = new_dict();
-    gameRounds = new_dict();
-    randomnessRequests = new_dict();
+;;     ;; Start the first round with round count 0
+;;     depositCount = new_dict();
+;;     gameRounds = new_dict();
+;;     randomnessRequests = new_dict();
 
-    _start_round(0);
-}
+;;     _start_round(0);
+;; }
 
 ;; Retrieves the deposits for a specific round
 (cell) get_deposits(int roundId) impure {
@@ -97,51 +153,6 @@
     _update_round_duration(newRoundDuration);  ;; Call the internal function to update the round duration
 }
 
-;; Pauses or unpauses the contract
-() set_contract_paused(slice in_msg,int pauseStatus) impure {
-    _validate_is_admin(in_msg);
-
-    contractPaused = pauseStatus;  ;; Set the contract paused status
-    set_data(begin_cell().store_int(contractPaused, 32).end_cell());
-}
-
-;; External function to update the value per entry, callable by the admin
-() update_value_per_entry(slice in_msg,int newValuePerEntry) impure {
-    _validate_is_admin(in_msg);  ;; Ensure the caller is the admin
-    _update_value_per_entry(newValuePerEntry);  ;; Call the internal function to update the value per entry
-}
-
-
-;; External function to update the protocol fee recipient, callable by the admin
-() update_protocol_fee_recipient(slice in_msg,slice newProtocolFeeRecipient) impure {
-    _validate_is_admin(in_msg);  ;; Ensure the caller is the admin
-    _update_protocol_fee_recipient(newProtocolFeeRecipient);  ;; Call the internal function to update the protocol fee recipient
-}
-
-;; External function to update the protocol fee basis points, callable by the admin
-() update_protocol_fee_bp(slice in_msg,int newProtocolFeeBp) impure {
-    _validate_is_admin(in_msg);  ;; Ensure the caller is the admin
-    _update_protocol_fee_bp(newProtocolFeeBp);  ;; Call the internal function to update the protocol fee basis points
-}
-
-;; External function to update the maximum number of deposits per round, callable by the admin
-() update_maximum_number_of_deposits_per_round(slice in_msg,int newMaxDepositsPerRound) impure {
-    _validate_is_admin(in_msg);  ;; Ensure the caller is the admin
-    _update_maximum_number_of_deposits_per_round(newMaxDepositsPerRound);  ;; Call the internal function to update the maximum deposits per round
-}
-
-;; External function to update the maximum number of participants per round, callable by the admin
-() update_maximum_number_of_participants_per_round(slice in_msg,int newMaxParticipantsPerRound) impure {
-    _validate_is_admin(in_msg);  ;; Ensure the caller is the admin
-    _update_maximum_number_of_participants_per_round(newMaxParticipantsPerRound);  ;; Call the internal function to update the maximum participants per round
-}
-
-() recv_internal(int msg_value, cell in_msg, slice in_msg_body) impure {
-    if (in_msg_body.slice_empty?()) {         ;; check if incoming message is empty (with no body)
-    return ();                              ;; return successfully and accept an empty message
-   }
-}
-
 ;; Handles user deposits for a specific round
 () deposit(slice in_msg, int roundId, cell deposits) impure {
     _ensure_contract_active();  ;; Ensure contract is not paused
@@ -155,4 +166,109 @@
     int roundId = numberOfRounds;  ;; Get the current round ID
     _cancel(roundId);  ;; Call the internal function to cancel the current round
     _deposit(in_msg,roundId + 1, deposits);  ;; Deposit to the next round (incremented roundId)
+}
+
+(cell, int, int, cell, slice, int, int, int, int, int, cell, slice, slice, slice) get_state_data() method_id {
+    load_data(); 
+    return (
+        gameRounds,
+        numberOfRounds,
+        contractPaused,
+        depositCount,
+        protocolFeeRecipient,
+        roundDuration,
+        valuePerEntry,
+        protocolFeeBp,
+        maximumNumberOfDepositsPerRound,
+        maximumNumberOfParticipantsPerRound,
+        randomnessRequests,
+        jettonAddr,
+        oracleAddr,
+        adminAddr
+    );
+}
+
+;; recv_internal is the main function of the contract and is called when it receives a message from other contracts
+() recv_internal(int my_balance, int msg_value, cell in_msg_full, slice in_msg_body) impure {
+    if (in_msg_body.slice_empty?()) {         ;; check if incoming message is empty (with no body)
+        return ();                              ;; return successfully and accept an empty message
+    }
+
+    slice cs = in_msg_full.begin_parse();
+    int flags = cs~load_uint(4);
+    if (flags & 1) { ;; ignore all bounced messages
+        return ();
+    }
+
+    slice sender_address = cs~load_msg_addr();
+
+    load_data(); ;; here we populate the storage variables
+
+    int op = in_msg_body~load_uint(32); ;; by convention, the first 32 bits of incoming message is the op
+    int query_id = in_msg_body~load_uint(64); ;; also by convention, the next 64 bits contain the "query id", although this is not always the case
+
+    if (op == op::update_round_duration) {
+        _validate_is_admin(sender_address);
+        int newRoundDuration = in_msg_body~load_uint(32);
+        _update_round_duration(newRoundDuration);
+        save_data();
+        return ();
+    }
+
+    if (op == op::update_maximum_deposits) {
+        _validate_is_admin(sender_address);
+        int maxDeposits = in_msg_body~load_uint(40);
+        _update_maximum_number_of_deposits_per_round(maxDeposits);
+        save_data();
+        return ();
+    }
+
+    if (op == op::update_maximum_participants) {
+        _validate_is_admin(sender_address);
+        int maxParticipants = in_msg_body~load_uint(40);
+        _update_maximum_number_of_participants_per_round(maxParticipants);
+        save_data();
+        return ();
+    }
+
+    if (op == op::update_protocol_fee_bp) {
+        _validate_is_admin(sender_address);
+        int newProtocolFeeBp = in_msg_body~load_uint(16);
+        _update_protocol_fee_bp(newProtocolFeeBp);
+        save_data();
+        return ();
+    }
+
+    if (op == op::update_protocol_fee_recipient) {
+        _validate_is_admin(sender_address);
+        slice addr = in_msg_body~load_msg_addr();
+        _update_protocol_fee_recipient(addr);
+        save_data();
+        return ();
+    }
+
+    if (op == op::update_value_per_entry) {
+        _validate_is_admin(sender_address);
+        int newValuePerEntry = in_msg_body~load_uint(256);
+        _update_value_per_entry(newValuePerEntry);
+        save_data();
+        return ();
+    }
+
+    if (op == op::set_contract_paused) {
+        _validate_is_admin(sender_address);
+        int bPause = in_msg_body~load_uint(1);
+        contractPaused = bPause;
+        save_data();
+        return ();
+    }
+
+    if (op == op::transfer_admin) {
+        _validate_is_admin(sender_address);
+        adminAddr = in_msg_body~load_msg_addr();
+        save_data();
+        return ();
+    }
+
+    throw(0xffff); ;; if the message contains an op that is not known to this contract, we throw
 }
