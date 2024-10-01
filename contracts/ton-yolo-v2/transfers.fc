@@ -1,0 +1,41 @@
+#include "../imports/stdlib.fc";
+
+;; Inline function to transfer TON to a specified address
+() _transfer_ton(slice toAddress, int amount) impure inline {
+    ;; Create an empty message body
+    var msg_body = begin_cell()
+        .store_uint(0, 1)  ;; Empty message body
+    .end_cell();
+
+    ;; Build the message
+    var msg = begin_cell()
+        .store_uint(0x10, 6)  ;; Flags for sending the message
+        .store_slice(toAddress)  ;; Correctly store the address as a slice
+        .store_coins(amount)  ;; Amount of TON to transfer
+        .store_ref(msg_body)  ;; Attach the empty message body
+    .end_cell();
+
+    ;; Send the message with mode 1 (pay gas fees)
+    send_raw_message(msg, 1);
+}
+
+;; Internal function to transfer Jetton tokens to the contract
+() _transfer_jetton(slice tokenAddress, int fromAddress, int amount) impure inline {
+    ;; Prepare internal message for Jetton transfer
+    var msg_body = begin_cell()
+        .store_uint(0x18, 32)  ;; OP code for Jetton transfer
+        .store_uint(0, 64)  ;; Query ID (set to 0 for no response)
+        .store_int(fromAddress, 256)  ;; Address of the user transferring the Jetton
+        .store_coins(amount)  ;; Amount of Jetton to transfer
+        .store_uint(0, 1)  ;; Forward payload (set to empty)
+    .end_cell();
+
+    ;; Send message to Jetton wallet contract
+    var msg = begin_cell()
+        .store_uint(0x10, 6)  ;; Flags for internal message
+        .store_slice(tokenAddress)  ;; Address of Jetton contract
+        .store_ref(msg_body)  ;; Message body for Jetton transfer
+    .end_cell();
+
+    send_raw_message(msg, 1);  ;; Send the message with mode 1 (pay gas fees)
+}

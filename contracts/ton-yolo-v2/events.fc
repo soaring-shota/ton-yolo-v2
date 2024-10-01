@@ -1,0 +1,119 @@
+#include "../imports/stdlib.fc";
+
+;; Emits event for randomness request
+() _emit_randomness_requested(int roundId, int requestId) inline {
+    ;; Create a cell to store the event data
+    var event_data = begin_cell()
+        .store_uint(0x02, 32)  ;; Custom opcode for "RandomnessRequested" event
+        .store_int(roundId, 64)  ;; Store the round ID
+        .store_int(requestId, 256)  ;; Store the request ID
+    .end_cell();
+
+    ;; Send an internal message to log the event
+    var event_msg = begin_cell()
+        .store_uint(0x10, 6)  ;; Flags for internal message
+        .store_slice(null())  ;; Send to null address (acts as log)
+        .store_ref(event_data)  ;; Message body containing event data
+    .end_cell();
+
+    send_raw_message(event_msg, 1);  ;; Send the message with mode 1
+}
+
+;; Emits event for round status update
+() _emit_round_status_updated(int roundId, int status) inline {
+    ;; Create a cell to store the event data
+    var event_data = begin_cell()
+        .store_uint(0x03, 32)  ;; Custom opcode for "RoundStatusUpdated" event
+        .store_int(roundId, 64)  ;; Store the round ID
+        .store_int(status, 8)  ;; Store the new status
+    .end_cell();
+
+    ;; Send an internal message to log the event
+    var event_msg = begin_cell()
+        .store_uint(0x10, 6)  ;; Flags for internal message
+        .store_slice(null())  ;; Send to null address (acts as log)
+        .store_ref(event_data)  ;; Message body containing event data
+    .end_cell();
+
+    send_raw_message(event_msg, 1);  ;; Send the message with mode 1
+}
+
+;; Emits a deposited event by sending an internal message
+() _emit_deposited(int userAddress, int roundId, int totalEntriesCount) inline {
+    ;; Create the event message body
+    var msg_body = begin_cell()
+        .store_uint(0x01, 32)  ;; Custom opcode for "Deposited" event
+        .store_int(userAddress, 256)  ;; Store the user address
+        .store_int(roundId, 64)  ;; Store the round ID
+        .store_int(totalEntriesCount, 64)  ;; Store the total number of entries
+    .end_cell();
+
+    ;; Send an internal message to the event log
+    var event_msg = begin_cell()
+        .store_uint(0x10, 6)  ;; Flags for internal message
+        .store_slice(null())  ;; Send to null address (acts as log)
+        .store_ref(msg_body)  ;; Message body containing event data
+    .end_cell();
+
+    send_raw_message(event_msg, 1);  ;; Send the message with mode 1
+}
+
+;; Internal function to emit the "Prizes Claimed" event
+() _emit_prizes_claimed(int roundId, int winnerAddress, cell prizeIndices) inline {
+    ;; Create a cell to store the event data
+    var event_data = begin_cell()
+        .store_uint(0x04, 32)  ;; Custom opcode for "PrizesClaimed" event
+        .store_int(roundId, 64)  ;; Store the round ID
+        .store_int(winnerAddress, 256)  ;; Store the winner's address
+        .store_ref(prizeIndices)  ;; Store the indices of the claimed prizes
+    .end_cell();
+
+    ;; Send an internal message to log the event
+    var event_msg = begin_cell()
+        .store_uint(0x10, 6)  ;; Flags for internal message
+        .store_slice(null())  ;; Send to a null address (acts as a log)
+        .store_ref(event_data)  ;; Message body containing event data
+    .end_cell();
+
+    send_raw_message(event_msg, 1);  ;; Send the message with mode 1
+}
+
+;; Internal function to emit the "Deposits Withdrawn" event
+() _emit_deposits_withdrawn(int roundId, int userAddress, cell depositIndices) inline {
+    ;; Create a cell to store the event data
+    var event_data = begin_cell()
+        .store_uint(0x05, 32)  ;; Custom opcode for "DepositsWithdrawn" event
+        .store_int(roundId, 64)  ;; Store the round ID
+        .store_int(userAddress, 256)  ;; Store the user address
+        .store_ref(depositIndices)  ;; Store the indices of the withdrawn deposits
+    .end_cell();
+
+    ;; Send an internal message to log the event
+    var event_msg = begin_cell()
+        .store_uint(0x10, 6)  ;; Flags for internal message
+        .store_slice(null())  ;; Send to null address (acts as log)
+        .store_ref(event_data)  ;; Message body containing event data
+    .end_cell();
+
+    send_raw_message(event_msg, 1);  ;; Send the message with mode 1
+}
+
+;; Emit event for updating maximum number of deposits per round
+() _emit_maximum_number_of_deposits_per_round_updated(int newMaxDepositsPerRound) inline {
+    var event_data = begin_cell()
+        .store_uint(0x06, 32)  ;; Custom opcode for "MaximumNumberOfDepositsPerRoundUpdated" event
+        .store_int(newMaxDepositsPerRound, 64)  ;; Store the new maximum deposits
+    .end_cell();
+
+    send_raw_message(begin_cell().store_uint(0x10, 6).store_slice(null()).store_ref(event_data).end_cell(), 1);
+}
+
+;; Emit event for updating maximum number of participants per round
+() _emit_maximum_number_of_participants_per_round_updated(int newMaxParticipantsPerRound) inline {
+    var event_data = begin_cell()
+        .store_uint(0x07, 32)  ;; Custom opcode for "MaximumNumberOfParticipantsPerRoundUpdated" event
+        .store_int(newMaxParticipantsPerRound, 64)  ;; Store the new maximum participants
+    .end_cell();
+
+    send_raw_message(begin_cell().store_uint(0x10, 6).store_slice(null()).store_ref(event_data).end_cell(), 1);
+}

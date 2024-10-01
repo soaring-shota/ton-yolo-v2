@@ -1,0 +1,150 @@
+#include "../imports/stdlib.fc";
+#include "global.fc";
+#include "constants.fc";
+#include "events.fc";
+#include "transfers.fc";
+#include "helpers.fc";
+
+;; Internal function to start a new round
+(int) _start_round(int currentRoundsCount) impure inline {
+    int roundId = currentRoundsCount + 1;  ;; Increment round ID
+
+    ;; Initialize round data
+    cell newRound = begin_cell()
+        .store_uint(ROUND_ACTIVE, 8)  ;; Set status to "Open"
+        .store_uint(protocolFeeBp, 16)  ;; Store protocol fee basis points
+        .store_uint(now() + roundDuration, 40)  ;; Set cutoff time
+        .store_uint(maximumNumberOfDepositsPerRound, 40)  ;; Maximum deposits allowed
+        .store_uint(maximumNumberOfParticipantsPerRound, 40)  ;; Maximum participants allowed
+        .store_uint(valuePerEntry, 256)  ;; Value per entry
+    .end_cell();
+
+    ;; Convert `roundId` to a 256-bit slice
+    slice roundIdSlice = begin_cell().store_uint(roundId, 256).end_cell().begin_parse(); 
+
+    gameRounds = gameRounds.dict_set(256, roundIdSlice, newRound.begin_parse());  ;; Store the new round data
+    numberOfRounds = roundId;  ;; Update the rounds count
+
+    _emit_round_status_updated(roundId, ROUND_ACTIVE);  ;; Emit event for round status update
+    return roundId;  ;; Return the new round ID
+}
+
+;; Internal function to draw a winner for a round using on-chain randomness
+() _draw_winner(int roundId, cell roundData) impure inline {
+    ;; Update the round status to "Drawing"
+    builder roundDataBuilder = begin_cell().store_slice(begin_parse(roundData));
+
+    roundDataBuilder = roundDataBuilder.store_uint(ROUND_DRAWN, 8);  ;; Set status to Drawing
+    int drawnAt = now();  ;; Set the drawn time to current block timestamp
+    roundDataBuilder = roundDataBuilder.store_uint(drawnAt, 40);  ;; Store the drawn timestamp
+
+    roundData = roundDataBuilder.end_cell();
+
+    ;; Generate a random number using on-chain data
+    int random_number = _get_random();  ;; Use the get_random function to obtain a random number
+
+    ;; Check if randomness request already exists
+    (_, int exists) = randomnessRequests.udict_get?(256, roundId);
+    throw_if(exists > 0, 108);  ;; Error if randomness request already exists
+
+    ;; Assume `roundId` is an int and `random_number` is an int
+    ;; Convert `roundId` to a 256-bit slice
+    slice roundIdSlice = begin_cell().store_uint(roundId, 256).end_cell().begin_parse();
+
+    ;; Store `random_number` in a cell and convert to a slice
+    slice randomNumberSlice = begin_cell().store_uint(random_number, 32).end_cell().begin_parse();
+
+    ;; Use `dict_set` to update the dictionary with the correct key and value types
+    randomnessRequests = randomnessRequests.dict_set(256, roundIdSlice, randomNumberSlice);
+
+    _emit_randomness_requested(roundId, random_number);  ;; Emit event for randomness request
+    _emit_round_status_updated(roundId, ROUND_DRAWN);  ;; Emit event for round status update
+}
+
+;; Draws the winner for the current round, callable externally
+() draw_winner() impure {
+    _ensure_contract_active();  ;; Ensure the contract is not paused
+
+    int roundId = numberOfRounds;  ;; Get the current round ID
+    var (cell roundData,_) = gameRounds.udict_get_ref?(256, roundId);  ;; Fetch the round data
+
+    throw_unless(roundData.cell_null?() != null(), 102);  ;; Ensure the round exists
+    slice roundDataSlice = begin_parse(roundData);
+
+    int roundStatus = roundDataSlice~load_uint(8);
+    throw_unless(roundStatus == ROUND_ACTIVE, 103);  ;; Validate round status is open
+
+    int cutoffTime = roundDataSlice~load_uint(40);
+    throw_unless(now() >= cutoffTime, 104);  ;; Check if cutoff time has been reached
+
+    int numberOfParticipants = roundDataSlice~load_uint(40);
+    throw_unless(numberOfParticipants >= 2, 105);  ;; Ensure sufficient participants
+
+    _draw_winner(roundId, roundData);  ;; Call internal draw_winner function
+}
+
+;; Internal function to cancel a specific round
+() _cancel(int roundId) impure inline {
+    var (cell roundData, _) = gameRounds.udict_get_ref?(256, roundId);  ;; Fetch the round data
+    throw_unless(roundData.cell_null?() != null(), 102);  ;; Ensure the round exists
+
+    slice roundDataSlice = begin_parse(roundData);
+
+    int roundStatus = roundDataSlice~load_uint(8);
+    throw_unless(roundStatus == ROUND_ACTIVE, 103);  ;; Ensure the round status is "Open"
+
+    int cutoffTime = roundDataSlice~load_uint(40);
+    throw_unless(now() >= cutoffTime, 104);  ;; Check if the cutoff time has been reached
+
+    int numberOfParticipants = roundDataSlice~load_uint(40);
+    throw_unless(numberOfParticipants <= 1, 105);  ;; Ensure there are no more than 1 participant
+
+    ;; Update the round status to "Cancelled"
+    builder roundDataBuilder = begin_cell().store_slice(roundDataSlice);
+    roundDataBuilder = roundDataBuilder.store_uint(ROUND_CANCELLED, 8);
+    roundData = roundDataBuilder.end_cell();
+
+    slice roundIdSlice = begin_cell().store_uint(roundId, 256).end_cell().begin_parse();
+
+    gameRounds = gameRounds.dict_set(256, roundIdSlice, roundData.begin_parse());
+
+    _emit_round_status_updated(roundId, ROUND_CANCELLED);  ;; Emit event for round status update
+    _start_round(roundId);  ;; Start a new round with the updated round count
+}
+
+;; External function to cancel the current round, callable externally
+() cancel() impure {
+    _ensure_contract_active();  ;; Ensure the contract is not paused
+    int roundId = numberOfRounds;  ;; Get the current round ID
+    _cancel(roundId);  ;; Call internal cancel function with the current round ID
+}
+
+;; External function to cancel the round after a randomness request, callable externally
+() cancel_after_randomness_request() impure {
+    _ensure_contract_active();  ;; Ensure the contract is not paused
+
+    int roundId = numberOfRounds;  ;; Get the current round ID
+    var (cell roundData,_) = gameRounds.udict_get_ref?(256, roundId);  ;; Fetch the round data
+
+    throw_unless(roundData.cell_null?() != null(), 102);  ;; Ensure the round exists
+    slice roundDataSlice = begin_parse(roundData);
+
+    int roundStatus = roundDataSlice~load_uint(8);
+    throw_unless(roundStatus == ROUND_DRAWN, 103);  ;; Validate round status is "Drawing"
+
+    int drawnAt = roundDataSlice~load_uint(40);
+    throw_unless(now() >= drawnAt + 86400, 104);  ;; Ensure draw expiration time has passed (1 day = 86400 seconds)
+
+    ;; Update the round status to "Cancelled"
+    builder roundDataBuilder = begin_cell().store_slice(roundDataSlice);
+    roundDataBuilder = roundDataBuilder.store_uint(ROUND_CANCELLED, 8);
+    roundData = roundDataBuilder.end_cell();
+
+    ;; Convert `roundId` to a 256-bit slice
+    slice roundIdSlice = begin_cell().store_uint(roundId, 256).end_cell().begin_parse();  
+
+    gameRounds = gameRounds.dict_set(256, roundIdSlice, roundData.begin_parse());
+
+    _emit_round_status_updated(roundId, ROUND_CANCELLED);  ;; Emit event for round status update
+    _start_round(roundId);  ;; Start a new round with the updated round count
+}

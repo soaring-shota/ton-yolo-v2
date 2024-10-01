@@ -1,0 +1,226 @@
+#include "../imports/stdlib.fc";
+#include "global.fc";
+#include "constants.fc";
+#include "contract.fc";
+#include "events.fc";
+#include "transfers.fc";
+#include "helpers.fc";
+
+;; Internal function to pay the protocol fee
+() _pay_protocol_fee(int protocolFeeOwed) impure inline {
+    if (protocolFeeOwed > 0) {
+        _transfer_ton(protocolFeeRecipient, protocolFeeOwed);  ;; Use the existing transfer function to pay the protocol fee
+    }
+}
+
+;; Internal function to adjust TON amount after deducting protocol fee
+(int) _adjust_ton_amount(int tonAmount, int protocolFeeOwed) inline {
+    if (protocolFeeOwed >= tonAmount) {
+        return 0;  ;; If protocol fee is greater than or equal to the TON amount, the adjusted amount is 0
+    } else {
+        return tonAmount - protocolFeeOwed;  ;; Deduct the protocol fee from the TON amount
+    }
+}
+
+;; External function to claim prizes, callable externally
+() claim_prizes(slice in_msg,cell claimPrizesCalldata) impure {
+    _ensure_contract_active();  ;; Ensure the contract is not paused
+
+    slice user = in_msg~load_msg_addr();
+
+    ;; Initialize variables
+    int tonAmount = 0;
+    int protocolFeeOwed = 0;
+    int transferAmount = 0;
+    
+    int i = 0;  ;; Initialize iterator
+
+    slice claimPrizesCalldataSlice =  begin_parse(claimPrizesCalldata);
+    int calldataLength = claimPrizesCalldataSlice.slice_refs();
+    while (i < calldataLength) {
+        
+        var (slice calldataSlice,_) = claimPrizesCalldataSlice.load_ref();  ;; Load a reference from the slice
+        int roundId = calldataSlice~load_uint(64);
+        var (cell roundData,_) = gameRounds.udict_get_ref?(256, roundId);  ;; Fetch the round data
+
+        throw_unless(roundData.cell_null?() != null(), 102);  ;; Ensure the round exists
+        
+        slice roundDataSlice = begin_parse(roundData);
+        int roundStatus = roundDataSlice~load_uint(8);
+        throw_unless(roundStatus == ROUND_DRAWN, 103);  ;; Validate round status is "Drawn"
+
+        slice winner = roundDataSlice~load_msg_addr();
+        throw_unless(winner.slice_hash() == user.slice_hash(), 104);  ;; Ensure caller is the winner
+
+        var (_,cell prizeIndices) = calldataSlice.load_ref();
+        int j = 0;  ;; Initialize inner iterator
+        slice prizeIndicesSlice = begin_parse(prizeIndices);
+        int prizeIndicesLength = prizeIndicesSlice.slice_refs();
+        builder roundDataBuilder = begin_cell().store_slice(roundDataSlice);
+
+        while (j < prizeIndicesLength) {
+            int index = prizeIndicesSlice~load_uint(32);
+            var (cell prizeData,_) = roundData.udict_get_ref?(256,index);
+            slice prizeDataSlice = begin_parse(prizeData);    
+
+            int withdrawn = prizeDataSlice~load_uint(1);
+            throw_unless(withdrawn == 0, 105);  ;; Check if the prize is already withdrawn
+
+            int tokenType = prizeDataSlice~load_uint(8);
+            if (tokenType == TOKEN_TYPE_TON) {
+                tonAmount += prizeDataSlice~load_coins();  ;; Handle TON prize
+            } elseif (tokenType == TOKEN_TYPE_JETTON) {
+                int amount = prizeDataSlice~load_uint(256);
+                _transfer_jetton(prizeDataSlice, user.slice_hash(), amount);  ;; Handle Jetton prize
+            }
+            
+            roundDataBuilder = roundDataBuilder.store_ref(begin_cell().store_uint(1, 1).end_cell());  ;; Mark prize as withdrawn
+            roundData = roundDataBuilder.end_cell();
+            j += 1;  ;; Increment inner iterator
+        }
+
+        protocolFeeOwed += roundDataSlice~load_uint(256);  ;; Accumulate protocol fee owed
+        roundDataBuilder = roundDataBuilder.store_uint(0, 256);  ;; Set protocol fee owed to 0
+        roundData = roundDataBuilder.end_cell();
+
+        _emit_prizes_claimed(roundId, user.slice_hash(), prizeIndices);  ;; Emit event for prizes claimed
+
+        i += 1;  ;; Increment outer iterator
+    }
+
+    if (protocolFeeOwed != 0) {
+        _pay_protocol_fee(protocolFeeOwed);
+        tonAmount = _adjust_ton_amount(tonAmount, protocolFeeOwed);
+    }
+
+    if (tonAmount != 0) {
+        _transfer_ton(user, tonAmount);
+    }
+}
+
+
+;; External view function to calculate protocol fee owed for claiming prizes
+(int) get_claim_prizes_payment_required(cell claimPrizesCalldata) impure {
+    int tonAmount = 0;
+    int protocolFeeOwed = 0;
+
+    int i = 0;  ;; Initialize iterator
+    slice claimPrizesCalldataSlice = begin_parse(claimPrizesCalldata);
+    int calldataLength = claimPrizesCalldataSlice.slice_refs();
+    while (i < calldataLength) {
+        var (slice calldataSlice,_) = claimPrizesCalldataSlice.load_ref();
+        int roundId = calldataSlice~load_uint(64);
+        var (cell roundData,_) = gameRounds.udict_get_ref?(256, roundId);  ;; Fetch the round data
+
+        throw_unless(roundData.cell_null?() != null(), 102);  ;; Ensure the round exists
+        slice roundDataSlice = begin_parse(roundData);    
+
+        int roundStatus = roundDataSlice~load_uint(8);
+        throw_unless(roundStatus == ROUND_DRAWN, 103);  ;; Validate round status is "Drawn"
+
+        cell prizeIndices = calldataSlice~load_ref();
+        int j = 0;  ;; Initialize inner iterator
+        slice prizeIndicesSlice = begin_parse(prizeIndices);
+        int prizeIndicesLength = prizeIndicesSlice.slice_refs();
+        while (j < prizeIndicesLength) {
+            int index = prizeIndicesSlice~load_uint(32);
+            var (cell prizeData,_) = roundData.udict_get_ref?(256,index);
+            slice prizeDataSlice = begin_parse(prizeData);
+
+            int tokenType = prizeDataSlice~load_uint(8);
+            if (tokenType == TOKEN_TYPE_TON) {
+                tonAmount += prizeDataSlice~load_coins();  ;; Calculate TON prize amount
+            }
+
+            j += 1;  ;; Increment inner iterator
+        }
+
+        protocolFeeOwed += roundDataSlice~load_uint(256);  ;; Accumulate protocol fee owed
+        i += 1;  ;; Increment outer iterator
+    }
+
+    ;; Adjust protocol fee owed
+    if (protocolFeeOwed < tonAmount) {
+        protocolFeeOwed = 0;
+    } else {
+        protocolFeeOwed -= tonAmount;
+    }
+
+    return protocolFeeOwed;  ;; Return the calculated protocol fee owed
+}
+
+;; External function to withdraw deposits, callable externally
+() withdraw_deposits(slice in_msg,int roundId, cell depositIndices) impure {
+    _ensure_contract_active();  ;; Ensure the contract is not paused
+
+    slice user = in_msg~load_msg_addr();
+
+    ;; Fetch the round data
+    var (cell roundData,_) = gameRounds.udict_get_ref?(256, roundId);
+    throw_unless(roundData.cell_null?() != null(), 102);  ;; Ensure the round exists
+    slice roundDataSlice = begin_parse(roundData);
+    int roundStatus = roundDataSlice~load_uint(8);
+    throw_unless(roundStatus == ROUND_CANCELLED, 103);  ;; Validate round status is "Cancelled"
+
+    int tonAmount = 0;
+    slice depositIndicesSlice = begin_parse(depositIndices);
+    int depositsLength = depositIndicesSlice.slice_refs();
+    int i = 0;  ;; Initialize iterator
+    while (i < depositsLength) {
+        int index = depositIndicesSlice~load_uint(32);
+        var (cell depositData,_) = roundData.udict_get_ref?(256,index);
+        slice depositDataSlice = begin_parse(depositData);
+
+        slice depositor = depositDataSlice~load_msg_addr();
+        throw_unless(depositor.slice_hash() == user.slice_hash(), 104);  ;; Ensure the caller is the depositor
+
+        int withdrawn = depositDataSlice~load_uint(1);
+        throw_unless(withdrawn == 0, 105);  ;; Check if the deposit is already withdrawn
+
+        int tokenType = depositDataSlice~load_uint(8);
+        if (tokenType == TOKEN_TYPE_TON) {
+            tonAmount += depositDataSlice~load_coins();  ;; Handle TON withdrawal
+        } elseif (tokenType == TOKEN_TYPE_JETTON) {
+            int tokenAmount = depositDataSlice~load_uint(256);
+            _transfer_jetton(depositDataSlice, user.slice_hash(), tokenAmount);  ;; Handle Jetton withdrawal
+        }
+
+        ;; Mark deposit as withdrawn
+        builder roundDataBuilder = begin_cell().store_slice(roundDataSlice);
+        roundDataBuilder = roundDataBuilder.store_ref(begin_cell().store_uint(1, 1).end_cell());
+        roundData = roundDataBuilder.end_cell();
+        i += 1;  ;; Increment iterator
+    }
+
+    ;; Transfer accumulated TON amount
+    if (tonAmount != 0) {
+        _transfer_ton(user, tonAmount);
+    }
+
+    _emit_deposits_withdrawn(roundId, user.slice_hash(), depositIndices);  ;; Emit event for deposits withdrawn
+}
+
+;; Fetches the current price of TON or Jetton from the Oracle contract
+(int) _fetch_price(int isJetton) impure inline {
+   
+    slice oracle_query = begin_cell()
+        .store_uint(isJetton, 1)  ;; Parameter: 0 for TON, 1 for Jetton
+        .end_cell().begin_parse();
+
+   ;; Prepare the internal message to query the Oracle contract
+    var msg_body = begin_cell()
+    .store_slice(oracle_query)  ;; Store the oracle query slice
+    .end_cell();
+
+    ;; Construct the full message cell to send
+    var msg = begin_cell()
+        .store_uint(0x10, 6)  ;; Flags for the internal message (e.g., bounceable, pay gas fees)
+        .store_slice(ORACLE_ADDR)  ;; Address of the Oracle contract (as a slice)
+        .store_coins(0)  ;; Amount of TON to send (0 if no TON is sent)
+        .store_ref(msg_body)  ;; Store the message body as a reference
+        .end_cell();
+    
+    ;; Send the message to the Oracle contract
+    send_raw_message(msg, 1);  ;; Send with mode 1 (pay gas fees)
+    return 0;
+}

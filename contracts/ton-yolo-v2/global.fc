@@ -1,0 +1,12 @@
+global int totalDeposits;  ;; Total amount of TON deposits in the contract
+global cell gameRounds;   ;; Dictionary storing information about each game round
+global int numberOfRounds; ;; Counter for the total number of game rounds created
+global int contractPaused; ;; Status of the contract (0 - Active, 1 - Paused)
+global cell depositCount;  ;; Dictionary to store the number of deposits for each user in each round
+global slice protocolFeeRecipient; ;; Address of the recipient for protocol fees
+global int roundDuration; ;; Duration of each game round in seconds
+global int valuePerEntry; ;; TON value required per entry in each game round
+global int protocolFeeBp; ;; Protocol fee in basis points (1 basis point = 0.01%)
+global int maximumNumberOfDepositsPerRound; ;; Maximum number of deposits allowed in a single round
+global int maximumNumberOfParticipantsPerRound; ;; Maximum number of participants allowed in a single round
+global cell randomnessRequests; ;; Randomness requests

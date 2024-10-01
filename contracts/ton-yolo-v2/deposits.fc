@@ -1,0 +1,147 @@
+#include "../imports/stdlib.fc";
+#include "global.fc";
+#include "constants.fc";
+#include "rounds.fc";
+#include "prizes.fc";
+#include "helpers.fc";
+
+;; Adds a deposit entry to the round
+() _add_deposit(int roundId, int tokenType, int tokenAddress, int amount, int userAddress, int entryIndex) impure {
+    ;; Add deposit details to the round's storage
+    var (cell roundData, _) = gameRounds.udict_get_ref?(256, roundId);
+    cell depositData = begin_cell()
+        .store_uint(tokenType, 8)
+        .store_uint(tokenAddress, 256)
+        .store_uint(amount, 256)
+        .store_uint(userAddress, 256)
+        .store_uint(entryIndex, 40)
+    .end_cell();
+
+    builder roundDataBuilder = begin_cell().store_slice(begin_parse(roundData));
+    roundDataBuilder = roundDataBuilder.store_ref(depositData);
+    roundData = roundDataBuilder.end_cell();
+
+    ;; Convert `roundId` (int) to a 256-bit slice
+    slice roundIdSlice = begin_cell().store_uint(roundId, 256).end_cell().begin_parse();
+
+    ;; Ensure `roundData` is a slice
+    slice roundDataSlice = roundData.begin_parse(); ;; If `roundData` is already a cell
+
+    ;; Use dict_set with correct types
+    gameRounds = gameRounds.dict_set(256, roundIdSlice, roundDataSlice);
+}
+
+;; Handles Jetton deposits and prevents other token types
+() _handle_jetton_deposits(int roundId, cell deposits, int userAddress, cell roundData, int roundDepositCount, int totalEntriesCount) impure {
+    int i = 0;  ;; Initialize the iterator
+    int depositsLength = begin_parse(deposits).slice_refs();  ;; Get the number of deposits
+
+    ;; Loop through each deposit using a while loop
+    while (i < depositsLength) {
+        var (slice singleDeposit, cell remainingDeposits) = begin_parse(deposits).load_ref();  
+        deposits = remainingDeposits;
+
+        int tokenType = singleDeposit~load_uint(8);  ;; Load token type (0: TON, 1: Jetton, 2: ERC-20)
+        throw_unless(tokenType == 1, 107);  ;; Ensure the token type is Jetton (1), otherwise reject
+
+        int tokenAddress = singleDeposit~load_uint(256);  ;; Load token address
+        int amount = singleDeposit~load_uint(256);  ;; Load token amount
+        
+        ;; Parse the cell into a slice first
+        slice roundDataSlice = begin_parse(roundData);
+        int entriesCount = amount / roundDataSlice~load_uint(256);  ;; Calculate entries count based on value per entry
+
+        throw_unless(entriesCount > 0, 106);  ;; Ensure valid entries count
+
+        int currentEntryIndex = _get_current_entry_index(roundData, roundDepositCount, entriesCount);  ;; Get current entry index
+
+        _add_deposit(roundId, tokenType, tokenAddress, amount, userAddress, currentEntryIndex);  ;; Add deposit to state
+        
+        ;; Convert the token address to a slice for the function call
+        slice tokenAddressSlice = begin_cell().store_uint(tokenAddress, 256).end_cell().begin_parse();
+        _transfer_jetton(tokenAddressSlice, userAddress, amount);  ;; Transfer Jetton token
+
+        ;; Update deposit counts
+        roundDepositCount += 1;  
+        totalEntriesCount += entriesCount;  
+
+        i += 1;  ;; Increment the iterator
+    }
+}
+
+;; Internal function to handle deposits for a specific round
+() _deposit(slice in_msg,int roundId, cell deposits) impure inline {
+
+    ;; Extract user address and round data
+    slice user = in_msg~load_msg_addr();
+    int user_key = user.slice_hash();
+    (cell roundData,_) = gameRounds.udict_get_ref?(256, roundId);  ;; Fetch round data
+    slice roundDataSlice = roundData.begin_parse();
+
+    throw_unless(roundDataSlice.slice_empty?(), 102);  ;; Ensure the round exists  ;; Ensure the round exists
+    int roundStatus = roundDataSlice~load_uint(8);
+    int cutoffTime = roundDataSlice~load_uint(40);
+    throw_unless(roundStatus == ROUND_ACTIVE, 103);  ;; Round must be active
+    throw_unless(now() < cutoffTime, 104);  ;; Current time must be before cutoff time
+
+    ;; Retrieve user deposit count for this round
+    var (maybe_user_count, user_count_found) = depositCount.udict_get?(256, user_key);
+    int userDepositCount = user_count_found ? maybe_user_count.preload_uint(32) : 0;
+
+    ;; Increment number of participants if user is depositing for the first time
+    if (userDepositCount == 0) {
+        int numberOfParticipants = roundDataSlice~load_uint(40) + 1;
+        builder roundDataBuilder = begin_cell().store_slice(roundDataSlice);
+        roundDataBuilder = roundDataBuilder.store_uint(numberOfParticipants, 40);
+        roundData = roundDataBuilder.end_cell();
+    }
+
+    int roundDepositCount = roundDataSlice~load_uint(40);
+    int totalEntriesCount = 0;
+    int currentEntryIndex = 0;
+
+    ;; Handle TON deposits
+    var msg_value = in_msg~load_coins();
+    if (msg_value > 0) {
+        int roundValuePerEntry = roundDataSlice~load_uint(256);
+        throw_unless(msg_value % roundValuePerEntry == 0, 104);  ;; Value must be divisible by value per entry
+        int entriesCount = msg_value / roundValuePerEntry;
+        totalEntriesCount += entriesCount;
+
+        currentEntryIndex = _get_current_entry_index(roundData, roundDepositCount, entriesCount);
+        _add_deposit(roundId, 0, 0, msg_value, user_key, currentEntryIndex);  ;; TokenType_TON is 0
+        roundDepositCount += 1;
+    }
+
+    slice depositSlice = begin_parse(deposits);
+
+    ;; Check if the deposits cell is not empty
+    if (depositSlice.slice_refs() > 0) {
+        _handle_jetton_deposits(roundId, deposits, user_key, roundData, roundDepositCount, totalEntriesCount);
+    }
+
+    slice roundDataSlice = begin_parse(roundData);
+
+    ;; Check maximum deposit limits
+    int maxDeposits = roundDataSlice~load_uint(40);
+    throw_unless(roundDepositCount <= maxDeposits, 105);  ;; Check if maximum deposits reached
+
+    ;; Draw winner if conditions are met
+    int numParticipants = roundDataSlice~load_uint(40);
+    if (numParticipants == maximumNumberOfParticipantsPerRound) {
+        _draw_winner(roundId,roundData);  ;; Draw the winner if the maximum number of participants is reached
+    } else {
+        ;; Check if the conditions for drawing the winner are met
+        if (numParticipants > 1) {
+            if (roundDepositCount == maxDeposits) {
+                _draw_winner(roundId,roundData);  ;; Draw the winner if more than one participant and maximum deposits reached
+            }
+        }
+    }
+
+    slice userKeySlice = begin_cell().store_uint(user_key,256).end_cell().begin_parse();
+    slice newUserDepositCountSlice = begin_cell().store_uint(userDepositCount + 1, 32).end_cell().begin_parse();
+    depositCount = depositCount.dict_set(256, userKeySlice, newUserDepositCountSlice);
+    _emit_deposited(user_key, roundId, totalEntriesCount);
+}
+

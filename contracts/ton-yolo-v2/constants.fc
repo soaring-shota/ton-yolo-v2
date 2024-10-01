@@ -1,0 +1,13 @@
+;; Contract constants
+const slice JETTON_ADDR = "EQArzP5prfRJtDM5WrMNWyr9yUTAi0c9o6PfR4hkWy9UQXHx"a;  ;; Jetton token address
+const slice ORACLE_ADDR = "0QCLCl7DXpqtljXBRfxzupL7qbc0_gXSSWJtjVD4bFse3VVE"a;  ;; Oracle contract address
+const slice ADMIN_ADDR = "0QCM4c41g1YiC-Qlh7yYdY8wLqS4sM5eWncLmH_aTgCthDbe"a; ;; Admin account
+
+;; Round state constants
+const int ROUND_PENDING = 0;
+const int ROUND_ACTIVE = 1;
+const int ROUND_COMPLETE = 2;
+const int ROUND_DRAWN = 3;
+const int ROUND_CANCELLED = 4;
+const int TOKEN_TYPE_TON = 0;
+const int TOKEN_TYPE_JETTON = 1;

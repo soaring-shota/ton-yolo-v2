@@ -1,0 +1,158 @@
+#include "../imports/stdlib.fc";
+#include "./constants.fc";
+#include "./events.fc";
+#include "./global.fc";
+#include "./helpers.fc";
+#include "./prizes.fc";
+#include "./transfers.fc";
+#include "./rounds.fc";
+#include "./deposits.fc";
+
+;; Internal function to update the round duration
+() _update_round_duration(int newRoundDuration) impure inline {
+    roundDuration = newRoundDuration;  ;; Update the round duration
+}
+
+;; Validates if the caller is the admin
+() _validate_is_admin(slice in_msg) inline {
+    slice user = in_msg~load_msg_addr();
+    throw_unless(user.slice_hash() == ADMIN_ADDR.slice_hash(), 106);  ;; Check if the signing address is the admin
+}
+
+;; Internal function to update the value per entry
+() _update_value_per_entry(int newValuePerEntry) impure inline {
+    valuePerEntry = newValuePerEntry;  ;; Update the value per entry
+}
+
+;; Internal function to update the protocol fee recipient
+() _update_protocol_fee_recipient(slice newProtocolFeeRecipient) impure inline {
+    protocolFeeRecipient = newProtocolFeeRecipient;  ;; Update the protocol fee recipient address
+}
+
+;; Internal function to update the protocol fee basis points
+() _update_protocol_fee_bp(int newProtocolFeeBp) impure inline {
+    protocolFeeBp = newProtocolFeeBp;  ;; Update the protocol fee basis points
+}
+
+
+;; Internal function to update the maximum number of deposits per round
+() _update_maximum_number_of_deposits_per_round(int newMaxDepositsPerRound) impure inline {
+    maximumNumberOfDepositsPerRound = newMaxDepositsPerRound;  ;; Update the maximum deposits per round
+    _emit_maximum_number_of_deposits_per_round_updated(newMaxDepositsPerRound);  ;; Emit event for the update
+}
+
+
+;; Internal function to update the maximum number of participants per round
+() _update_maximum_number_of_participants_per_round(int newMaxParticipantsPerRound) impure inline {
+    throw_unless(newMaxParticipantsPerRound >= 2, 107);  ;; Ensure at least 2 participants per round
+    maximumNumberOfParticipantsPerRound = newMaxParticipantsPerRound;  ;; Update the maximum participants per round
+    _emit_maximum_number_of_participants_per_round_updated(newMaxParticipantsPerRound);  ;; Emit event for the update
+}
+
+;; Constructor function to initialize the contract
+() initialize(slice in_msg) impure {
+
+    ;; Ensure the caller is the admin
+    _validate_is_admin(in_msg);
+    in_msg~load_coins();
+    contractPaused = in_msg~load_uint(1);
+    protocolFeeRecipient = in_msg~load_msg_addr();
+    roundDuration = in_msg~load_uint(32);
+    valuePerEntry = in_msg~load_uint(256);
+    protocolFeeBp = in_msg~load_uint(16);
+    maximumNumberOfDepositsPerRound = in_msg~load_uint(40);
+    maximumNumberOfParticipantsPerRound = in_msg~load_uint(40);
+
+    ;; Initialize contract parameters
+    _update_round_duration(roundDuration);  ;; Set the round duration
+    _update_protocol_fee_recipient(protocolFeeRecipient);  ;; Set the protocol fee recipient
+    _update_protocol_fee_bp(protocolFeeBp);  ;; Set the protocol fee basis points
+    _update_value_per_entry(valuePerEntry);  ;; Set the value per entry
+    _update_maximum_number_of_deposits_per_round(maximumNumberOfDepositsPerRound);  ;; Set max deposits per round
+    _update_maximum_number_of_participants_per_round(maximumNumberOfParticipantsPerRound);  ;; Set max participants per round
+
+    ;; Start the first round with round count 0
+    depositCount = new_dict();
+    gameRounds = new_dict();
+    randomnessRequests = new_dict();
+
+    _start_round(0);
+}
+
+;; Retrieves the deposits for a specific round
+(cell) get_deposits(int roundId) impure {
+    ;; Access the round data from the storage
+    var (cell roundData,_) = gameRounds.udict_get_ref?(256, roundId);
+    throw_unless(roundData.cell_null?() != null(), 102);  ;; Ensure the round exists
+
+    ;; Extract the deposits from the round data
+    slice roundDataSlice = begin_parse(roundData);
+    cell deposits = roundDataSlice~load_ref();  ;; Assuming deposits are stored in a reference
+    return deposits;  ;; Return the deposits cell
+}
+
+;; External function to update the round duration, callable by the admin
+() update_round_duration(slice in_msg,int newRoundDuration) impure {
+    _validate_is_admin(in_msg);  ;; Ensure the caller is the admin
+    _update_round_duration(newRoundDuration);  ;; Call the internal function to update the round duration
+}
+
+;; Pauses or unpauses the contract
+() set_contract_paused(slice in_msg,int pauseStatus) impure {
+    _validate_is_admin(in_msg);
+
+    contractPaused = pauseStatus;  ;; Set the contract paused status
+    set_data(begin_cell().store_int(contractPaused, 32).end_cell());
+}
+
+;; External function to update the value per entry, callable by the admin
+() update_value_per_entry(slice in_msg,int newValuePerEntry) impure {
+    _validate_is_admin(in_msg);  ;; Ensure the caller is the admin
+    _update_value_per_entry(newValuePerEntry);  ;; Call the internal function to update the value per entry
+}
+
+
+;; External function to update the protocol fee recipient, callable by the admin
+() update_protocol_fee_recipient(slice in_msg,slice newProtocolFeeRecipient) impure {
+    _validate_is_admin(in_msg);  ;; Ensure the caller is the admin
+    _update_protocol_fee_recipient(newProtocolFeeRecipient);  ;; Call the internal function to update the protocol fee recipient
+}
+
+;; External function to update the protocol fee basis points, callable by the admin
+() update_protocol_fee_bp(slice in_msg,int newProtocolFeeBp) impure {
+    _validate_is_admin(in_msg);  ;; Ensure the caller is the admin
+    _update_protocol_fee_bp(newProtocolFeeBp);  ;; Call the internal function to update the protocol fee basis points
+}
+
+;; External function to update the maximum number of deposits per round, callable by the admin
+() update_maximum_number_of_deposits_per_round(slice in_msg,int newMaxDepositsPerRound) impure {
+    _validate_is_admin(in_msg);  ;; Ensure the caller is the admin
+    _update_maximum_number_of_deposits_per_round(newMaxDepositsPerRound);  ;; Call the internal function to update the maximum deposits per round
+}
+
+;; External function to update the maximum number of participants per round, callable by the admin
+() update_maximum_number_of_participants_per_round(slice in_msg,int newMaxParticipantsPerRound) impure {
+    _validate_is_admin(in_msg);  ;; Ensure the caller is the admin
+    _update_maximum_number_of_participants_per_round(newMaxParticipantsPerRound);  ;; Call the internal function to update the maximum participants per round
+}
+
+() recv_internal(int msg_value, cell in_msg, slice in_msg_body) impure {
+    if (in_msg_body.slice_empty?()) {         ;; check if incoming message is empty (with no body)
+    return ();                              ;; return successfully and accept an empty message
+   }
+}
+
+;; Handles user deposits for a specific round
+() deposit(slice in_msg, int roundId, cell deposits) impure {
+    _ensure_contract_active();  ;; Ensure contract is not paused
+    _deposit(in_msg,roundId,deposits);
+}
+
+;; External function to cancel the current round and deposit to the next round, callable externally
+() cancel_current_round_and_deposit_to_next_round(slice in_msg,cell deposits) impure {
+    _ensure_contract_active();  ;; Ensure the contract is not paused
+
+    int roundId = numberOfRounds;  ;; Get the current round ID
+    _cancel(roundId);  ;; Call the internal function to cancel the current round
+    _deposit(in_msg,roundId + 1, deposits);  ;; Deposit to the next round (incremented roundId)
+}

@@ -1,0 +1,30 @@
+#include "../imports/stdlib.fc";
+#include "global.fc";
+#include "constants.fc";
+
+;; Helper functions
+
+;; Fetches the current entry index without accrual
+(int) _get_current_entry_index(cell roundData, int roundDepositCount, int entriesCount) inline {
+    ;; Check if there are no previous deposits in the round
+    if (roundDepositCount == 0) {
+        return entriesCount - 1;  ;; If no deposits, return entriesCount - 1 as the current entry index
+    } else {
+        ;; Load the last deposit entry index
+        (cell lastDeposit, _) = roundData.udict_get_ref?(256, roundDepositCount - 1);
+        slice lastDepositSlice = begin_parse(lastDeposit);
+        int lastEntryIndex = lastDepositSlice~load_uint(40);  ;; Load the current entry index from the last deposit
+        return lastEntryIndex + entriesCount;  ;; Add the new entries count to the last entry index
+    }
+}
+
+;; Generates a random number on-chain
+int _get_random() impure inline {
+    randomize_lt();  ;; Initialize randomness
+    return random();  ;; Return a random number
+}
+
+;; Helper function to check if the contract is paused
+() _ensure_contract_active() inline {
+    throw_unless(contractPaused == 0, 106); ;; Throw an error if the contract is paused
+}
